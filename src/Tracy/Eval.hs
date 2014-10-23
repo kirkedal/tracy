@@ -38,7 +38,7 @@ evalMaybe e Nothing = error e
 evalMaybe _ (Just a) = return a
 
 -- Used for debugging.
-tell a | trace (show a) False = undefined 
+--tell a | trace (show a) False = undefined 
 tell a = W.tell a
 
 -------------------------------------------------------------------------------
