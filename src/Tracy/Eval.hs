@@ -55,7 +55,7 @@ runEval eval store funenv = runReaderT (runWriterT (runStateT (runE eval) store)
 -- ** Creating an output trace
 -------------------------------------------------------------------------------
 type EvalTrace  = TA.Trace
-type EvalAction = TA.Action
+type EvalAction = Action
 
 emptyEvalTrace :: EvalTrace
 emptyEvalTrace = []
@@ -65,25 +65,25 @@ tellIfTracing a "" =
   do  t <- isTracing
       if t
         then tell [a]
-        else tell [TA.Error a]
+        else tell [Error a]
 tellIfTracing a b =
   do  t <- isTracing
       if t
-			  then tell [a, TA.Debug b]
-			  else tell [TA.Error a, TA.Debug b]
+			  then tell [a, Debug b]
+			  else tell [Error a, Debug b]
 
 tracePrePost :: String -> Expr -> Eval ()
 tracePrePost prePost expr = tell []
 
 traceDebug :: String -> Eval ()
-traceDebug s = tell [TA.Debug s]
+traceDebug s = tell [Debug s]
 
 traceAssign :: Ident -> Expr -> Eval ()
 traceAssign ident expr = do
     prefix <- getPrefix
     i      <- lookupFName ident
     v      <- lookupValue ident
-    tellIfTracing (TA.Assign prefix i posExpr) (i ++ " := " ++ pretty v)
+    tellIfTracing (Assign prefix i posExpr) (i ++ " := " ++ pretty v)
   where 
     posExpr = 
       if   isBoolExpr expr
@@ -95,12 +95,12 @@ traceType ident =
   do  prefix <- getPrefix
       i   <- lookupFName ident
       v   <- lookupValue ident
-      tellIfTracing (TA.Decl prefix (valueToType v) i) ""
+      tellIfTracing (Decl prefix (valueToType v) i) ""
 
 traceCond :: Expr -> Value -> Eval()
 traceCond expr (VVal _ _ 1) = 
   do  prefix <- getPrefix
-      tellIfTracing (TA.Assume prefix posExpr) ""
+      tellIfTracing (Assume prefix posExpr) ""
   where 
     posExpr = 
       if   isBoolExpr expr
@@ -108,7 +108,7 @@ traceCond expr (VVal _ _ 1) =
       else BinOpExpr expr Neq FalseExpr
 traceCond expr _        = 
   do  prefix <- getPrefix
-      tellIfTracing (TA.Assume prefix negExpr) ""
+      tellIfTracing (Assume prefix negExpr) ""
   where 
     negExpr = 
       if   isBoolExpr expr
@@ -118,7 +118,7 @@ traceCond expr _        =
 traceAssert :: Expr -> Value -> Eval()
 traceAssert expr (VVal _ _ 1) = 
   do  prefix <- getPrefix
-      tellIfTracing (TA.Assert prefix posExpr) ""
+      tellIfTracing (Assert prefix posExpr) ""
   where 
     posExpr = 
       if   isBoolExpr expr
@@ -126,7 +126,7 @@ traceAssert expr (VVal _ _ 1) =
       else BinOpExpr expr Neq FalseExpr
 traceAssert expr _        = 
   do  prefix <- getPrefix
-      tellIfTracing (TA.Assert prefix negExpr) ""
+      tellIfTracing (Assert prefix negExpr) ""
   where 
     negExpr = 
       if   isBoolExpr expr
@@ -142,7 +142,7 @@ traceRepairVariable =
     traceRV prefix (Just ident) =
       do val <- lookupValue ident
          case val of
-           (VVal _ _ _) -> tell [TA.Assign prefix "controllable" (VarExpr $ "controllable_" ++ ident)]
+           (VVal _ _ _) -> tell [Assign prefix "controllable" (VarExpr $ "controllable_" ++ ident)]
            (_rest )     -> error "Repair variable is not assigned."
 
 

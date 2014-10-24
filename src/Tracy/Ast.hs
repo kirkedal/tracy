@@ -36,14 +36,15 @@ data Func     = Func { retType   :: Type      -- ^ Return type
 -- |A statement
 data Stmt     = DefVar Ident Type 
               | Expression Expr                      
-              | Assign Ident Expr                    
+              | AssignVar Ident Expr                    
               | AssignArray Ident Expr Expr          
               | Return Expr                       
               | Cond Expr [Stmt] [Stmt]           
               | While Expr [Stmt]
-              | Assert Int Expr
+              | AssertStmt Int Expr
               | BlockStmt Ident [Stmt]
               | Spec String
+              | Injection Action
               deriving (Show, Eq)
 
 -- |Expression 
@@ -142,5 +143,23 @@ type Array = A.Array Integer BV.BitVector
 instance Eq Value where
   (==) (VVal _t1 _p1 v1) (VVal _t2 _p2 v2) = (==) v1 v2
   (==) _ _ = error "Wrong types in =="
+
+
+-------------------------------------------------------------------------------
+-- ** Actions
+-------------------------------------------------------------------------------
+
+-- Error numbers are not handled yet
+data Action     = Decl   ErrorNumber Type Ident
+                | Assume ErrorNumber Expr
+                | Assign ErrorNumber Ident Expr
+                | Assert ErrorNumber Expr
+                | Error  Action
+                | Debug  String
+                | Begin  String
+                | End    String
+                deriving (Eq, Show)
+
+type ErrorNumber = String
 
 

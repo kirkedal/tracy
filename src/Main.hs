@@ -23,6 +23,7 @@ import qualified Tracy.TraceAst as TA
 import Tracy.SimpCParser (parseFromFile, parseString, parseValue, parseExpr, ParseError)
 import Tracy.PreProcess (preprocess, normBoolCond)
 import Tracy.Trace 
+import Tracy.LineInjecter
 
 import System.Environment
 import System.Exit
@@ -58,6 +59,7 @@ parseArgs args = pa args emptySettings
         pa ("--pp-output":str:l)        set = pa l set{ ppOutFile = Just str }
         pa ("--3AC":l)                  set = pa l set{ proc3AC = True }
         pa ("--SSA":l)                  set = pa l set{ procSSA = True }
+        pa ("--inject":str:l)           set = pa l set{ injections = str:(injections set) }
         pa ("--debug":l)                set = pa l set{ debugMode = True }
         pa ("--help":l)                 set = error usage
         pa (flag:l)                     _   = error $ "Invalid flag: " ++ flag
@@ -85,6 +87,7 @@ usage = "Usage of tracer: Tracer \n"
      ++ "    --pp-output [file]  Write preparsed C code to file\n"
      ++ "    --3AC               Perform 3 address code transformation\n"
      ++ "    --SSA               Perform static single assignment transformation on trace\n"
+     ++ "    --inject [lin:code] Updates the code in line \"lin\" to the code in \"code\"\n"
      ++ "    --debug             More verbose output trace\n"
      ++ "    --help              This menu"
 
@@ -94,13 +97,15 @@ usage = "Usage of tracer: Tracer \n"
 
 parseAndRun :: Settings -> IO ()
 parseAndRun settings =
-    do  (def, funcs) <- fromEither =<< parseInput (filename settings)
+    do  injectCode   <- parseInjection settings
+        (def, funcs) <- parseInput injectCode
         updSettings  <- parseAssignment settings
         preExpr      <- fromEither =<< parseExpr (precondition settings) "Precondition" 
         postExpr     <- fromEither =<< parseExpr (postcondition settings) "Postcondition" 
         let astStripped  = (def, map (\f -> foldl filterBlock f (strip_out settings)) funcs)
             astProcessed = preprocess settings astStripped
         outputToPPFile astProcessed settings
+
         evalTrace    <- interp astProcessed updSettings preExpr postExpr
         putStrLn $ TA.produceOutput settings evalTrace
         repairMaybe $ repairVar settings
@@ -127,9 +132,12 @@ parseAssignment set =
           return $ set {assignment = InputValues s v }
     otherwise -> return set
 
-parseInput :: String -> IO (Either ParseError Program)
-parseInput "-"      = parseString =<< getContents
-parseInput filename = parseFromFile filename
+parseInput :: String -> IO Program
+parseInput "-"        = fromEither =<< parseString =<< getContents
+parseInput codeString = fromEither =<< parseString codeString
+
+parseInjection :: Settings -> IO String
+parseInjection settings = injectLine (filename settings) (injections settings)
 
 fromEither :: Show a => Either a b -> IO b
 fromEither (Right a)  = return a

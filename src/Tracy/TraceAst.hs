@@ -14,25 +14,12 @@
 
 module Tracy.TraceAst where
 
-import qualified Tracy.Ast as Ast
+import Tracy.Ast
 import Tracy.AstPretty
 import Tracy.Types
 import Data.List (intercalate)
 
 type Trace      = [Action]
-
--- Error numbers are not handled yet
-data Action     = Decl   ErrorNumber Ast.Type Ast.Ident
-                | Assume ErrorNumber Ast.Expr
-                | Assign ErrorNumber Ast.Ident Ast.Expr
-                | Assert ErrorNumber Ast.Expr
-                | Error  Action
-                | Debug  String
-                | Begin  String
-                | End    String
-                deriving (Eq, Show)
-
-type ErrorNumber = String
 
 -------------------------------------------------------------------------------
 -- ** Output for showing programs and values
@@ -50,7 +37,7 @@ produceOutput set trace = intercalate "\n" $ map (outputTrace outputForm) $ filt
       | (outputFormat set) == Z3Bit = pretty
       | (outputFormat set) == Ccode = prettyC
 
-outputTrace :: (Ast.Expr -> String) -> Action -> String
+outputTrace :: (Expr -> String) -> Action -> String
 outputTrace _   (Decl   _ typ ident)  = "DECL " ++ pretty typ ++ " " ++ ident
 outputTrace fun (Assume _ expr)       = "ASSUME " ++ fun expr
 outputTrace fun (Assign _ ident expr) = ident ++ " := " ++ fun expr
@@ -64,49 +51,49 @@ outputTrace _   (End    string)       = "END(" ++ string ++ ")"
 class Output a where
   outputZ3Int :: a -> String
 
-instance Output Ast.Expr where
-  outputZ3Int (Ast.VarExpr ident) = ident
-  outputZ3Int (Ast.HexExpr int) = show int
-  outputZ3Int (Ast.ArrayExpr ident expr) = ident ++ "[" ++ outputZ3Int expr ++ "]"
-  outputZ3Int (Ast.TrueExpr) = "true"
-  outputZ3Int (Ast.FalseExpr) = "false"
-  outputZ3Int (Ast.ConstExpr _ c) = show c
-  outputZ3Int (Ast.ErrorExpr _c) = ""
-  outputZ3Int (Ast.UnOpExpr unOp expr) = "(" ++ outputZ3Int unOp ++ " " ++ outputZ3Int expr ++ ")"
-  outputZ3Int (Ast.BinOpExpr expr1 binOp expr2) =  
-    if   elem binOp [Ast.Neq]
-    then outputZ3Int $ Ast.UnOpExpr Ast.Not $ Ast.BinOpExpr expr1 Ast.Eq expr2
+instance Output Expr where
+  outputZ3Int (VarExpr ident) = ident
+  outputZ3Int (HexExpr int) = show int
+  outputZ3Int (ArrayExpr ident expr) = ident ++ "[" ++ outputZ3Int expr ++ "]"
+  outputZ3Int (TrueExpr) = "true"
+  outputZ3Int (FalseExpr) = "false"
+  outputZ3Int (ConstExpr _ c) = show c
+  outputZ3Int (ErrorExpr _c) = ""
+  outputZ3Int (UnOpExpr unOp expr) = "(" ++ outputZ3Int unOp ++ " " ++ outputZ3Int expr ++ ")"
+  outputZ3Int (BinOpExpr expr1 binOp expr2) =  
+    if   elem binOp [Neq]
+    then outputZ3Int $ UnOpExpr Not $ BinOpExpr expr1 Eq expr2
     else "(" ++ outputZ3Int binOp ++ " " ++ outputZ3Int expr1 ++ " " ++ outputZ3Int expr2 ++ ")"
-  outputZ3Int (Ast.FunCallExpr ident exprs) = error "Function calls are unrolled in traces."
-  outputZ3Int (Ast.CondExpr exprC expr1 expr2) = "(ite" ++ outputZ3Int exprC ++ " " ++ outputZ3Int expr1 ++ " " ++ outputZ3Int expr2 ++ ")"
+  outputZ3Int (FunCallExpr ident exprs) = error "Function calls are unrolled in traces."
+  outputZ3Int (CondExpr exprC expr1 expr2) = "(ite" ++ outputZ3Int exprC ++ " " ++ outputZ3Int expr1 ++ " " ++ outputZ3Int expr2 ++ ")"
 
-instance Output Ast.BinOp where 
-  outputZ3Int Ast.Plus   = "+"
-  outputZ3Int Ast.Minus  = "-"
-  outputZ3Int Ast.Mult   = "*"
-  outputZ3Int Ast.Div    = "/"
-  outputZ3Int Ast.And    = "and"
-  outputZ3Int Ast.Or     = "or"
-  outputZ3Int Ast.Eq     = "="
-  outputZ3Int Ast.Neq    = error "Not Equal is not defined in Z3 int."
-  outputZ3Int Ast.ULeq   = "<="
-  outputZ3Int Ast.UGeq   = ">="
-  outputZ3Int Ast.ULth   = "<"
-  outputZ3Int Ast.UGth   = ">"
-  outputZ3Int Ast.Leq    = "<="
-  outputZ3Int Ast.Geq    = ">="
-  outputZ3Int Ast.Lth    = "<"
-  outputZ3Int Ast.Gth    = ">"
-  outputZ3Int Ast.BAnd   = "&"
-  outputZ3Int Ast.BOr    = "|"
-  outputZ3Int Ast.BXor   = "^"
-  outputZ3Int Ast.SLeft  = "<<"
-  outputZ3Int Ast.SRight = ">>"
-  outputZ3Int Ast.BitIdx = "BIT"
+instance Output BinOp where 
+  outputZ3Int Plus   = "+"
+  outputZ3Int Minus  = "-"
+  outputZ3Int Mult   = "*"
+  outputZ3Int Div    = "/"
+  outputZ3Int And    = "and"
+  outputZ3Int Or     = "or"
+  outputZ3Int Eq     = "="
+  outputZ3Int Neq    = error "Not Equal is not defined in Z3 int."
+  outputZ3Int ULeq   = "<="
+  outputZ3Int UGeq   = ">="
+  outputZ3Int ULth   = "<"
+  outputZ3Int UGth   = ">"
+  outputZ3Int Leq    = "<="
+  outputZ3Int Geq    = ">="
+  outputZ3Int Lth    = "<"
+  outputZ3Int Gth    = ">"
+  outputZ3Int BAnd   = "&"
+  outputZ3Int BOr    = "|"
+  outputZ3Int BXor   = "^"
+  outputZ3Int SLeft  = "<<"
+  outputZ3Int SRight = ">>"
+  outputZ3Int BitIdx = "BIT"
 
-instance Output Ast.UnOp where
-  outputZ3Int Ast.Not        = "not"
-  outputZ3Int Ast.BNot       = "not"
-  outputZ3Int Ast.Neg        = "-"
-  outputZ3Int Ast.ToInt      = "(int)"
-  outputZ3Int Ast.ToUnsigned = "(unsigned)"
+instance Output UnOp where
+  outputZ3Int Not        = "not"
+  outputZ3Int BNot       = "not"
+  outputZ3Int Neg        = "-"
+  outputZ3Int ToInt      = "(int)"
+  outputZ3Int ToUnsigned = "(unsigned)"

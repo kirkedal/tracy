@@ -217,7 +217,7 @@ statements = liftM concat (many statement)
 -- |Single statement
 statement :: LangParser [Stmt]
 statement = try basic <|> try cond <|> try condS <|> try ret <|> try assert <|> try errorS <|> try block <|> try specS
-        <|> try basic <|> try def <|> try assignA <|> try assert2 <|> try for <|> try while <|> doWhile
+        <|> try basic <|> try def <|> try assignA <|> try for <|> try while <|> doWhile
   where
     basic   = do b <- basicStatement
                  symbol ";"
@@ -240,44 +240,39 @@ statement = try basic <|> try cond <|> try condS <|> try ret <|> try assert <|> 
                  return $ [Cond e s1 s2]
     while = do   reserved "while"
                  e <- parens expression
-                 s <- braces statements
+                 s <- choice [braces statements, statement]
                  return $ [While e s]
     doWhile = do reserved "do"
-                 s <- braces statements
+                 s <- choice [braces statements, statement]
                  reserved "while"
                  e <- parens expression
                  symbol ";"
                  return $ s ++ [While e s]
     for     = do reserved "for"
                  symbol "("
-                 a <- identifier
-                 symbol "="
-                 e <- expression
+                 as <- optionMaybe for_ass
                  symbol ";"
                  c <- expression
                  symbol ";"
                  i <- basicStatement
                  symbol ")"
-                 s <- braces statements
-                 return $ (Assign a e):[While c (s ++ i)]
+                 s <- choice [braces statements, statement]
+                 return $ case as of
+                    Nothing    -> [While c (s ++ i)]
+                    Just (a,e) -> (AssignVar a e):[While c (s ++ i)]
+    for_ass = do a <- identifier
+                 symbol "="
+                 e <- expression
+                 return (a,e)
     ret = do     reserved "return"
                  e <- expression
                  symbol ";"
                  return $ [Return e]
-    assert2 = do reserved "assert"
+    assert  = do reserved "assert"
                  p <- getPosition
                  e <- parens expression
                  symbol ";"
-                 return $ [Assert (sourceLine p) e]
-    assert = do  symbol "//"
-                 reserved "SPEC"
-                 symbol "#"
-                 i <- constant
-                 symbol ":"
-                 reserved "assert"
-                 e <- parens expression
-                 symbol ";"
-                 return $ [Assert (fromIntegral i) e]
+                 return $ [AssertStmt (sourceLine p) e]
     errorS = do  symbol "/*"
                  reserved "ERROR_BEGIN"
                  symbol "*/"
@@ -308,19 +303,19 @@ basicStatement = try passign <|> try assign <|> try expr <|> defAss
     passign = do i <- identifier
                  o <- pOpps
                  e <- expression
-                 return $ [Assign i (BinOpExpr (VarExpr i) o e)]
+                 return $ [AssignVar i (BinOpExpr (VarExpr i) o e)]
     expr   = do  e <- expression
                  return $ [Expression e]
     assign = do  a <- identifier
                  symbol "="
                  e <- expression
-                 return $ [Assign a e]
+                 return $ [AssignVar a e]
     defAss = do  t <- cType
                  p <- optionMaybe $ symbol "*"
                  i <- identifier
                  l <- optionMaybe $ brackets constant
                  e <- optionMaybe $ symbol "=" >> expression
-                 let a = map (Assign i) $ maybeToList e 
+                 let a = map (AssignVar i) $ maybeToList e 
                  return $ case (p,l) of
                     (Nothing, Nothing) -> (DefVar i t):a
                     (Just _,  Nothing) -> (DefVar i (TPointer t)):a
@@ -427,6 +422,8 @@ pOpps = (symbol "|=" >> return BOr)
     <|> (symbol "-=" >> return Minus)
     <|> (symbol "/=" >> return Div)
     <|> (symbol "*=" >> return Mult)
+    <|> (symbol ">>=" >> return SRight)
+    <|> (symbol "<<=" >> return SLeft)
 
 -------------------------------------------------------------------------------
 -- ** Parsing input values

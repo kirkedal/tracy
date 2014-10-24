@@ -36,6 +36,7 @@ data Settings = Settings { filename      :: String
                          , proc3AC       :: Bool 
                          , debugMode     :: Bool
                          , varSize       :: VarSize
+                         , injections    :: [String]
                          }
                 deriving (Eq, Show)
 
@@ -56,6 +57,7 @@ emptySettings = Settings { filename      = "main.c"
                          , procSSA       = False
                          , debugMode     = False
                          , varSize       = VarSize{slong = 64, sint = 32, sshort = 16, schar = 8}
+                         , injections    = []
                          }
 
 data OutputFormat = Z3Int | Z3Bit | Ccode

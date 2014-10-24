@@ -95,11 +95,11 @@ ppStmt (Expression expr) =
   do e  <- ppExpr Top expr
      es <- extractExprs 
      return $ es ++ [(Expression e)]
-ppStmt (Assign ident expr) = 
+ppStmt (AssignVar ident expr) = 
   do e  <- ppExpr Top expr 
      es <- extractExprs 
      i  <- getFreshFromIdent ident
-     return $ es ++ [(Assign i e)]
+     return $ es ++ [(AssignVar i e)]
 ppStmt (AssignArray ident expr1 expr2) = 
   do  e1 <- ppExpr Top expr1
       e2 <- ppExpr Top expr2
@@ -120,10 +120,10 @@ ppStmt (While expr stmt) =
       es <- extractExprs 
       s  <- ppStmts stmt
       return $ es ++ [(While e (s ++ es))]
-ppStmt (Assert int expr) =
+ppStmt (AssertStmt int expr) =
   do  e  <- ppExpr Top expr
       es <- extractExprs 
-      return $ es ++ [(Assert int e)]
+      return $ es ++ [(AssertStmt int e)]
 ppStmt (BlockStmt ident stmts) =
   do ss <- ppStmts stmts
      return $ [BlockStmt ident ss]
@@ -134,7 +134,7 @@ extractExprs :: FreshNames [Stmt]
 extractExprs =
   do  fnState <- get
       put $ fnState {assignList = []}
-      return $ reverse $ map (\(i,e) -> Assign i e) $ assignList fnState
+      return $ reverse $ map (\(i,e) -> AssignVar i e) $ assignList fnState
 
 extractTypes :: FreshNames [Stmt]
 extractTypes =
@@ -212,7 +212,7 @@ assignedVarsStmts stmts = nub $ concatMap assignedVarsStmt stmts
 
 
 assignedVarsStmt :: Stmt -> [Ident]
-assignedVarsStmt (Assign ident _) = [ident]
+assignedVarsStmt (AssignVar ident _) = [ident]
 assignedVarsStmt (AssignArray ident _ _) = [ident]
 assignedVarsStmt (Cond _ stmt1 stmt2) = assignedVarsStmts $ stmt1 ++ stmt2
 assignedVarsStmt (While _ stmts) = assignedVarsStmts stmts

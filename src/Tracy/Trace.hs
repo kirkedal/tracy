@@ -114,9 +114,9 @@ interpProgram defs topFun values preExpr postExpr =
   do  setTopFun topFun
       setLocalFun $ topFun
       fun <- lookupFunction topFun
-      tell [TA.Begin "Arguments"]
+      tell [Begin "Arguments"]
       mapM_ interpDefValue (zip (args fun) values)
-      tell [TA.End "Arguments"]
+      tell [End "Arguments"]
       mapM_ interpDefGlobal defs
       interpStmts (body fun)
       (_,preExprUpd) <- interpExpr preExpr
@@ -164,7 +164,7 @@ interpStmts (stmt:stmts)      =
 interpStmt :: Stmt -> Eval(Value)
 interpStmt (DefVar ident t@(TArray typ (Just s))) = initArray ident typ (emptyArray s) >> traceType ident >> return VVoid
 interpStmt (DefVar ident tp)   = initValue ident tp >> traceType ident >> return VVoid
-interpStmt (Assign ident expr) = 
+interpStmt (AssignVar ident expr) = 
       do  (val, e) <- interpExpr expr 
           update val 
           updateValue ident val
@@ -197,25 +197,25 @@ interpStmt (Cond expr stmt1 stmt2) =
         else interpStmts stmt2
 interpStmt (While expr stmt) = 
   interpStmt (Cond expr (stmt ++ [While expr stmt]) [])
-interpStmt (Assert int expr) = 
-  do  (val, _) <- interpExpr expr
+interpStmt (AssertStmt int expr) = 
+  do  (val, e) <- interpExpr expr
       if valueToBool val
-        then traceAssert expr val >> return VVoid
-        else traceAssert (UnOpExpr Not expr) val >> traceDebug ("Assertion in line " ++ show int ++ " failed.") >> setReturnExpr FalseExpr >> return VVoid
+        then traceAssert e val >> return VVoid
+        else traceAssert (UnOpExpr Not e) val >> traceDebug ("Assertion in line " ++ show int ++ " failed.") >> setReturnExpr FalseExpr >> return VVoid
 interpStmt (BlockStmt "Error" stmts) = 
   do  _t <- isTracing
       setErrorSeen
-      tell [TA.Begin "Error"]
+      tell [Begin "Error"]
       toggleTracing
       val <- interpStmts stmts
       toggleTracing
       traceRepairVariable 
-      tell [TA.End "Error"]
+      tell [End "Error"]
       return val
 interpStmt (BlockStmt bname stmts) = 
-  do  tell [TA.Begin bname]
+  do  tell [Begin bname]
       val <- interpStmts stmts
-      tell [TA.End bname]
+      tell [End bname]
       return val
 interpStmt (Spec _) = return VVoid
 
@@ -259,18 +259,18 @@ interpExpr e@(ConstExpr pol int)    =
       | width <= 32   = ConstantSize_32
       | otherwise = error "Constant exceeds largest bit-width of implementation (32 bits)."
 interpExpr (IncDecExpr IncPre ident)  = 
-  do interpStmt (Assign ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
+  do interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
      interpExpr (VarExpr ident)
 interpExpr (IncDecExpr IncPost ident) = 
   do r <- interpExpr (VarExpr ident)
-     interpStmt (Assign ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
      return r
 interpExpr (IncDecExpr DecPre ident)  = 
-  do interpStmt (Assign ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
+  do interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
      interpExpr (VarExpr ident)
 interpExpr (IncDecExpr DecPost ident) = 
   do r <- interpExpr (VarExpr ident)
-     interpStmt (Assign ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
      return r
 interpExpr topExpr@(UnOpExpr unOp expr) = 
   do  (v1, e1) <- interpExpr expr
