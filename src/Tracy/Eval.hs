@@ -63,27 +63,43 @@ emptyEvalTrace = []
 tellIfTracing :: EvalAction -> String -> Eval()
 tellIfTracing a "" =
   do  t <- isTracing
+      pos <- getSourcePos
       if t
         then tell [a]
-        else tell [Error a]
+        else tell [Error pos a]
 tellIfTracing a b =
   do  t <- isTracing
+      pos <- getSourcePos
       if t
-			  then tell [a, Debug b]
-			  else tell [Error a, Debug b]
+			  then tell [a, Debug pos b]
+			  else tell [Error pos a, Debug pos b]
 
 tracePrePost :: String -> Expr -> Eval ()
 tracePrePost prePost expr = tell []
 
 traceDebug :: String -> Eval ()
-traceDebug s = tell [Debug s]
+traceDebug s = tell =<< liftM (\x -> [Debug x s]) getSourcePos
 
 traceAssign :: Ident -> Expr -> Eval ()
 traceAssign ident expr = do
     prefix <- getPrefix
+    pos    <- getSourcePos
     i      <- lookupFName ident
     v      <- lookupValue ident
-    tellIfTracing (Assign prefix i posExpr) (i ++ " := " ++ pretty v)
+    tellIfTracing (Assign pos prefix i posExpr) (i ++ " := " ++ pretty v)
+  where 
+    posExpr = 
+      if   isBoolExpr expr
+        then CondExpr expr (ConstExpr Signed 1) (ConstExpr Signed 0)
+        else expr
+
+traceAssignA :: Ident -> Expr -> Expr -> Eval ()
+traceAssignA ident exprI expr = do
+    prefix <- getPrefix
+    pos    <- getSourcePos
+    i      <- lookupFName ident
+    v      <- lookupValue ident
+    tellIfTracing (AssignA pos prefix i exprI posExpr) ""
   where 
     posExpr = 
       if   isBoolExpr expr
@@ -93,14 +109,16 @@ traceAssign ident expr = do
 traceType :: Ident -> Eval ()
 traceType ident =
   do  prefix <- getPrefix
-      i   <- lookupFName ident
-      v   <- lookupValue ident
-      tellIfTracing (Decl prefix (valueToType v) i) ""
+      pos    <- getSourcePos
+      i      <- lookupFName ident
+      v      <- lookupValue ident
+      tellIfTracing (Decl pos prefix (valueToType v) i) ""
 
 traceCond :: Expr -> Value -> Eval()
 traceCond expr (VVal _ _ 1) = 
   do  prefix <- getPrefix
-      tellIfTracing (Assume prefix posExpr) ""
+      pos <- getSourcePos
+      tellIfTracing (Assume pos prefix posExpr) ""
   where 
     posExpr = 
       if   isBoolExpr expr
@@ -108,41 +126,36 @@ traceCond expr (VVal _ _ 1) =
       else BinOpExpr expr Neq FalseExpr
 traceCond expr _        = 
   do  prefix <- getPrefix
-      tellIfTracing (Assume prefix negExpr) ""
+      pos <- getSourcePos
+      tellIfTracing (Assume pos prefix negExpr) ""
   where 
     negExpr = 
       if   isBoolExpr expr
       then UnOpExpr Not expr
       else BinOpExpr expr Neq TrueExpr
 
-traceAssert :: Expr -> Value -> Eval()
-traceAssert expr (VVal _ _ 1) = 
+traceAssert :: Expr -> Eval()
+traceAssert expr = 
   do  prefix <- getPrefix
-      tellIfTracing (Assert prefix posExpr) ""
+      pos <- getSourcePos
+      tellIfTracing (Assert pos prefix posExpr) ""
   where 
     posExpr = 
       if   isBoolExpr expr
       then expr
-      else BinOpExpr expr Neq FalseExpr
-traceAssert expr _        = 
-  do  prefix <- getPrefix
-      tellIfTracing (Assert prefix negExpr) ""
-  where 
-    negExpr = 
-      if   isBoolExpr expr
-      then UnOpExpr Not expr
-      else BinOpExpr expr Neq TrueExpr
+      else BinOpExpr expr Eq TrueExpr
 
 traceRepairVariable :: Eval()
 traceRepairVariable = 
   do  prefix <- getPrefix
-      traceRV prefix =<< getRepairVariable
+      pos <- getSourcePos
+      traceRV pos prefix =<< getRepairVariable
   where
-    traceRV _       Nothing     = return ()
-    traceRV prefix (Just ident) =
+    traceRV _   _       Nothing     = return ()
+    traceRV pos prefix (Just ident) =
       do val <- lookupValue ident
          case val of
-           (VVal _ _ _) -> tell [Assign prefix "controllable" (VarExpr $ "controllable_" ++ ident)]
+           (VVal _ _ _) -> tell [Assign pos prefix "controllable" (VarExpr $ "controllable_" ++ ident)]
            (_rest )     -> error "Repair variable is not assigned."
 
 
@@ -159,12 +172,21 @@ data FunState = FunState { globalvars :: VarState
                          , callExprs  :: [Expr]
                          , returnExpr :: Maybe Expr 
                          , freshVar   :: Int
+                         , currentPos :: SourcePos
                          }
               deriving (Eq, Show)
 
 emptyState :: FunState
 emptyState = FunState { globalvars = ("",M.empty), localvars = ("",M.empty), stack = [], tracing = True, error_seen = False, 
-                        returnExpr = Nothing, callExprs = [], freshVar = 1}
+                        returnExpr = Nothing, callExprs = [], freshVar = 1, currentPos = initSourcePos}
+
+setSourcePos :: SourcePos -> Eval ()
+setSourcePos pos = 
+  do  funState <- get 
+      put $ funState { currentPos = pos }
+
+getSourcePos :: Eval SourcePos
+getSourcePos = liftM currentPos get
 
 setTopFun :: Ident -> Eval ()
 setTopFun ident = 
@@ -264,6 +286,16 @@ initGlobalValue ident tp =
         l fs = if   M.member ident (snd $ globalvars fs)
                  then Nothing
                  else Just $ fs { globalvars = (fst $ globalvars fs, M.insert ident (VUnassigned tp, ident) (snd $ globalvars fs)) }
+
+initGlobalArray :: Ident -> Type -> Array -> Eval()
+initGlobalArray ident (TVal t p) a =
+  do funState <- get
+     s <- evalMaybe ("Variable " ++ ident ++ " already created") $ l funState
+     put s
+     where
+        l fs = if   M.member ident (snd $ globalvars fs)
+                 then Nothing
+                 else Just $ fs { globalvars = (fst $ globalvars fs, M.insert ident ((VArray t p a), ident) (snd $ globalvars fs)) }
 
 initArray :: Ident -> Type -> Array -> Eval()
 initArray ident (TVal t p) a = 

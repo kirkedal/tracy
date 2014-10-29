@@ -41,8 +41,8 @@ arrayFromList a = A.array (0,len-1) $ zip [0..len-1] a
 (!) _ _                = Nothing
 
 (//) :: Value -> (Value, Value) -> Value
-(//) (VArray t p fVal) (v, VVal _vt _vp b) = VArray t p (fVal A.// [(valueToInteger v,b)])
-(//) v                  _                = error "Wrong array types in update"
+(//) (VArray      t p fVal) (v, VVal _vt _vp b) = VArray t p (fVal A.// [(valueToInteger v,b)])
+(//) v                  v2                = error $ "Wrong array types in update:" ++ show v ++ " - " ++ show v2
 
 typeMax :: TypeVal -> TypeVal -> TypeVal
 typeMax TLong  _      = TLong
@@ -120,7 +120,7 @@ isBoolBinOp Gth   = True
 isBoolBinOp _     = False
 
 instance Ord Value where
-  compare (VVal _t1 _p1 v1) (VVal _t2 _p2 v2) = compare v1 v2
+  compare v1@(VVal _t1 _p1 _v1) v2@(VVal _t2 _p2 _v2) = compare (valueToInteger v1) (valueToInteger v2)
 --  compare  v                (VUnassigned _)   = valueToBool v
   compare v1 v2 = error $ "Wrong types in compare: " ++ show v1 ++ " and " ++ show v2
 

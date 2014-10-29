@@ -37,9 +37,6 @@ import Data.Maybe (fromMaybe)
 
 import qualified Data.Map as M
 
--- (function settings) (repairVar settings) vals (int_width settings) (normBoolCond preExpr) (normBoolCond postExpr)
---interp :: Program -> Ident -> Maybe Ident -> InputType -> Int -> Expr -> Expr -> Settings -> IO EvalTrace
--- interp (globals, funclist) ident repVar values valsize preExpr postExpr set = 
 interp :: Program -> Settings ->  Expr -> Expr -> IO EvalTrace
 interp (globals, funclist) set preExpr postExpr = 
   do vals <- generateInput values funEnv ident
@@ -51,7 +48,7 @@ interp (globals, funclist) set preExpr postExpr =
     ident  = function set
     values = assignment set
     repVar = T.repairVar set
-    valsize = int_width set
+    valsize = sint $ varSize set
     funEnv = FunEnv { funMap = M.fromList $ map (\x -> (funcname x, x)) funclist
                     , size = VarSize {sint = valsize, sshort = valsize `div` 2, schar = 8, slong = valsize * 2}
                     , repairVar = repVar, settings = set }
@@ -70,7 +67,7 @@ genInput funEnv ident generator =
   mapM generator $ map argsToType $ args topFun
   where
     topFun = fromMaybe ("Function "++ ident ++" not found") $ M.lookup ident $ funMap funEnv
-    argsToType  (DefVar _ typ) = typ
+    argsToType  (DefVar _ typ _) = typ
     fromMaybe e Nothing = error e
     fromMaybe _ (Just a) = a
 
@@ -112,11 +109,14 @@ traceExceptionHandler ConstantSize_32 = (putStrLn "Constant size exceeds bit-wid
 interpProgram :: [Stmt] -> Ident -> [Value] -> Expr -> Expr -> Eval()
 interpProgram defs topFun values preExpr postExpr = 
   do  setTopFun topFun
-      setLocalFun $ topFun
+      setLocalFun topFun
       fun <- lookupFunction topFun
-      tell [Begin "Arguments"]
-      mapM_ interpDefValue (zip (args fun) values)
-      tell [End "Arguments"]
+      case getFirstArgPos $ args fun of
+        Nothing  -> tell []
+        Just pos ->
+          do tell [Begin pos "arguments"]
+             mapM_ interpDefValue (zip (args fun) values)
+             tell [End pos "arguments"]
       mapM_ interpDefGlobal defs
       interpStmts (body fun)
       (_,preExprUpd) <- interpExpr preExpr
@@ -125,11 +125,14 @@ interpProgram defs topFun values preExpr postExpr =
       tracePrePost "postcondition" postExprUpd
       return ()
   where 
-    fromDefVar (DefVar i _) = i
-    valueToExpr v@(VVal _ p _)   = ConstExpr p $ fromIntegral $ valueToInteger v
+    getFirstArgPos [] = Nothing
+    getFirstArgPos ((DefVar _ _ p):ls) = Just p
 
 interpDefGlobal :: Stmt -> Eval()
-interpDefGlobal (DefVar ident tp)       = initGlobalValue ident tp
+interpDefGlobal (DefVar ident t@(TArray typ (Just s)) _) = 
+  initGlobalArray ident typ $ emptyArray s 
+interpDefGlobal (DefVar ident tp _) = 
+  initGlobalValue ident tp
 -- interpDefGlobal _ = undefined
 
 interpFunc :: Func -> [Value] -> Eval(Value)
@@ -140,16 +143,23 @@ interpFunc func values =
       mapM_ (uncurry traceAssign) $ zip (map fromDefVar $ args func) e
       interpStmts (body func)
   where 
-    fromDefVar (DefVar i _) = i
+    fromDefVar (DefVar i _ _) = i
     -- fromDefVar (_rest)      = undefined
 
 interpDefValue :: (Stmt, Value) -> Eval()
-interpDefValue ((DefVar ident tp), val)     = initValue ident tp >> updateValue ident val >> traceType ident
+interpDefValue ((DefVar ident tp pos), val) = 
+  do setSourcePos pos
+     initValue ident tp
+     updateValue ident val
+     traceType ident
 -- interpDefValue (_rest) = undefined
 
 
 interpDef :: Stmt -> Eval()
-interpDef (DefVar ident tp)       = initValue ident tp >> traceType ident
+interpDef (DefVar ident tp pos) = 
+  do setSourcePos pos
+     initValue ident tp
+     traceType ident
 -- interpDef (_rest) = undefined
 
 interpStmts :: [Stmt] -> Eval(Value)
@@ -162,62 +172,77 @@ interpStmts (stmt:stmts)      =
        else interpStmts stmts
 
 interpStmt :: Stmt -> Eval(Value)
-interpStmt (DefVar ident t@(TArray typ (Just s))) = initArray ident typ (emptyArray s) >> traceType ident >> return VVoid
-interpStmt (DefVar ident tp)   = initValue ident tp >> traceType ident >> return VVoid
-interpStmt (AssignVar ident expr) = 
-      do  (val, e) <- interpExpr expr 
-          update val 
-          updateValue ident val
-          traceAssign ident e
-          return VVoid
+interpStmt (DefVar ident t@(TArray typ (Just s)) pos) = 
+  do setSourcePos pos
+     initArray ident typ (emptyArray s) 
+     traceType ident 
+     return VVoid
+interpStmt (DefVar ident tp pos)   = 
+  do setSourcePos pos 
+     initValue ident tp 
+     traceType ident
+     return VVoid
+interpStmt (AssignVar ident expr pos) = 
+  do setSourcePos pos
+     (val, e) <- interpExpr expr 
+     update val 
+     updateValue ident val
+     traceAssign ident e
+     return VVoid
   where 
     update val = 
       do b <- isPerformingSSA
          if b then initValue ident (valueToType val) else return ()
-interpStmt (Expression expr) = 
-  do  (val, e) <- interpExpr expr 
-      return val
-interpStmt (AssignArray ident expr1 expr2) = 
-  do (val1, e1) <- interpExpr expr1
+interpStmt (Expression expr pos) = 
+  do setSourcePos pos
+     (val, e) <- interpExpr expr 
+     return val
+interpStmt (AssignArray ident expr1 expr2 pos) = 
+  do setSourcePos pos
+     (val1, e1) <- interpExpr expr1
      (val2, e2) <- interpExpr expr2
-     traceAssign ident e1
-     traceDebug $ ident ++ "[" ++ pretty e2 ++ "]"
+     traceAssignA ident e1 e2
+     traceDebug $ ident ++ "[" ++ pretty val1 ++ "] := " ++ pretty val2
      updateArray ident val1 val2 
      return VVoid
-interpStmt (Return expr) = 
-  do 
-    (v, e) <- interpExpr expr
-    setReturnExpr e 
-    return v 
-interpStmt (Cond expr stmt1 stmt2) = 
-  do  (val,exprO) <- interpExpr expr
-      traceCond exprO val
-      if   valueToBool val
-        then interpStmts stmt1
-        else interpStmts stmt2
-interpStmt (While expr stmt) = 
-  interpStmt (Cond expr (stmt ++ [While expr stmt]) [])
-interpStmt (AssertStmt int expr) = 
-  do  (val, e) <- interpExpr expr
-      if valueToBool val
-        then traceAssert e val >> return VVoid
-        else traceAssert (UnOpExpr Not e) val >> traceDebug ("Assertion in line " ++ show int ++ " failed.") >> setReturnExpr FalseExpr >> return VVoid
-interpStmt (BlockStmt "Error" stmts) = 
-  do  _t <- isTracing
-      setErrorSeen
-      tell [Begin "Error"]
-      toggleTracing
-      val <- interpStmts stmts
-      toggleTracing
-      traceRepairVariable 
-      tell [End "Error"]
-      return val
-interpStmt (BlockStmt bname stmts) = 
-  do  tell [Begin bname]
-      val <- interpStmts stmts
-      tell [End bname]
-      return val
-interpStmt (Spec _) = return VVoid
+interpStmt (Return expr pos) = 
+  do setSourcePos pos
+     (v, e) <- interpExpr expr
+     setReturnExpr e 
+     return v 
+interpStmt (Cond expr stmt1 stmt2 pos) = 
+  do setSourcePos pos
+     (val,exprO) <- interpExpr expr
+     traceCond exprO val
+     if valueToBool val
+       then interpStmts stmt1
+       else interpStmts stmt2
+interpStmt (While expr stmt pos) = 
+  interpStmt (Cond expr (stmt ++ [While expr stmt pos]) [] pos)
+interpStmt (AssertStmt int expr pos) = 
+  do setSourcePos pos
+     (val, e) <- interpExpr expr
+     if valueToBool val
+       then traceAssert e >> return VVoid
+       else traceAssert e >> traceDebug ("Assertion in line " ++ show int ++ " failed.") >> setReturnExpr FalseExpr >> return VVoid
+interpStmt (BlockStmt "error" stmts posf post) = 
+  do setSourcePos posf
+     _t <- isTracing
+     setErrorSeen
+     tell [Begin posf "error"]
+     toggleTracing
+     val <- interpStmts stmts
+     toggleTracing
+     traceRepairVariable 
+     tell [End post "error"]
+     return val
+interpStmt (BlockStmt bname stmts posf post) = 
+  do setSourcePos posf
+     tell [Begin posf bname]
+     val <- interpStmts stmts
+     tell [End post bname]
+     return val
+interpStmt (Spec _ _) = return VVoid
 
 interpExpr :: Expr -> Eval(Value, Expr)
 interpExpr e@(HexExpr int) = getValSize >>= \s -> return $ (constToValue Signed s int, e)
@@ -259,18 +284,22 @@ interpExpr e@(ConstExpr pol int)    =
       | width <= 32   = ConstantSize_32
       | otherwise = error "Constant exceeds largest bit-width of implementation (32 bits)."
 interpExpr (IncDecExpr IncPre ident)  = 
-  do interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
+  do p <- getSourcePos
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)) p)
      interpExpr (VarExpr ident)
 interpExpr (IncDecExpr IncPost ident) = 
-  do r <- interpExpr (VarExpr ident)
-     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)))
+  do p <- getSourcePos
+     r <- interpExpr (VarExpr ident)
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Plus (ConstExpr Signed 1)) p)
      return r
 interpExpr (IncDecExpr DecPre ident)  = 
-  do interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
+  do p <- getSourcePos
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)) p)
      interpExpr (VarExpr ident)
 interpExpr (IncDecExpr DecPost ident) = 
-  do r <- interpExpr (VarExpr ident)
-     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)))
+  do p <- getSourcePos
+     r <- interpExpr (VarExpr ident)
+     interpStmt (AssignVar ident (BinOpExpr (VarExpr ident) Minus (ConstExpr Signed 1)) p)
      return r
 interpExpr topExpr@(UnOpExpr unOp expr) = 
   do  (v1, e1) <- interpExpr expr

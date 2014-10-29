@@ -23,6 +23,7 @@ import qualified Text.Parsec.Token as P
 import qualified Text.Parsec.Char as PC
 import Text.Parsec.Prim (runP)
 import qualified Text.ParserCombinators.Parsec.Expr as E
+import Text.Parsec.Pos
 
 import Control.Monad
 import Data.Maybe (fromMaybe, maybeToList)
@@ -39,8 +40,8 @@ parseFromFile fname
     = do input <- readFile fname
          return (parse program fname input)
 
-parseString :: String -> IO (Either ParseError Program)
-parseString input = return $ parse program "stdIn" input
+parseString :: String -> String -> IO (Either ParseError Program)
+parseString from input = return $ parse program from input
 
 parseValue :: String -> Int -> IO (Either ParseError [Value])
 parseValue input size = return $ parse (value size) "Assignments" input
@@ -151,15 +152,17 @@ globals = do whiteSpace
 def :: LangParser [Stmt]
 def = try array <|> try var
   where
-    var = do  t <- cType
-              is <- sepBy1 identifier (symbol ",")
-              symbol ";"
-              return $ map (\x -> DefVar x t) is
-    array = do  t <- cType
-                i <- identifier
-                s <- brackets constant
-                symbol ";"
-                return $ [DefVar i (TArray t (Just s))]
+    var = do p <- getPosition
+             t <- cType
+             is <- sepBy1 identifier (symbol ",")
+             symbol ";"
+             return $ map (\x -> DefVar x t p) is
+    array = do p <- getPosition
+               t <- cType
+               i <- identifier
+               s <- brackets constant
+               symbol ";"
+               return $ [DefVar i (TArray t (Just s)) p]
 
 -- |Functions are at least 1 function
 functions :: LangParser [Func]
@@ -200,15 +203,16 @@ cTypeSize = try (reserved "char"  >> (return TChar))
 
 -- |Definitions
 definition :: LangParser Stmt
-definition = do t <- cType
-                p <- optionMaybe $ symbol "*"
+definition = do p <- getPosition
+                t <- cType
+                n <- optionMaybe $ symbol "*"
                 i <- identifier 
                 a <- optionMaybe $ brackets $ optionMaybe constant
-                return $ case (p,a) of
-                    (Nothing, Nothing)   -> DefVar i t
-                    (Nothing, Just(len)) -> DefVar i (TArray t len)
-                    (Just(_), Nothing)   -> DefVar i (TPointer t)
-                    (Just(_), Just(len)) -> DefVar i (TPointer (TArray t len))
+                return $ case (n,a) of
+                    (Nothing, Nothing)   -> DefVar i t p
+                    (Nothing, Just(len)) -> DefVar i (TArray t len) p
+                    (Just(_), Nothing)   -> DefVar i (TPointer t) p
+                    (Just(_), Just(len)) -> DefVar i (TPointer (TArray t len)) p
 
 -- |Statements are many
 statements :: LangParser [Stmt]
@@ -222,33 +226,39 @@ statement = try basic <|> try cond <|> try condS <|> try ret <|> try assert <|> 
     basic   = do b <- basicStatement
                  symbol ";"
                  return b
-    assignA = do a <- identifier
+    assignA = do p <- getPosition
+                 a <- identifier
                  s <- brackets expression
                  symbol "="
                  e <- expression
                  symbol ";"
-                 return $ [AssignArray a s e]
-    condS = do   reserved "if"
+                 return $ [AssignArray a s e p]
+    condS = do   p <- getPosition
+                 reserved "if"
                  e  <- parens expression
                  s1 <- choice [braces statements, statement]
-                 return $ [Cond e s1 []]
-    cond = do    reserved "if"
+                 return $ [Cond e s1 [] p]
+    cond = do    p <- getPosition
+                 reserved "if"
                  e  <- parens expression
                  s1 <- choice [braces statements, statement]
                  reserved "else"
                  s2 <- choice [braces statements, statement]
-                 return $ [Cond e s1 s2]
-    while = do   reserved "while"
+                 return $ [Cond e s1 s2 p]
+    while = do   p <- getPosition
+                 reserved "while"
                  e <- parens expression
                  s <- choice [braces statements, statement]
-                 return $ [While e s]
-    doWhile = do reserved "do"
+                 return $ [While e s p]
+    doWhile = do p <- getPosition
+                 reserved "do"
                  s <- choice [braces statements, statement]
                  reserved "while"
                  e <- parens expression
                  symbol ";"
-                 return $ s ++ [While e s]
-    for     = do reserved "for"
+                 return $ s ++ [While e s p]
+    for     = do p <- getPosition
+                 reserved "for"
                  symbol "("
                  as <- optionMaybe for_ass
                  symbol ";"
@@ -258,41 +268,48 @@ statement = try basic <|> try cond <|> try condS <|> try ret <|> try assert <|> 
                  symbol ")"
                  s <- choice [braces statements, statement]
                  return $ case as of
-                    Nothing    -> [While c (s ++ i)]
-                    Just (a,e) -> (AssignVar a e):[While c (s ++ i)]
+                    Nothing    -> [While c (s ++ i) p]
+                    Just (a,e) -> (AssignVar a e p):[While c (s ++ i) p]
     for_ass = do a <- identifier
                  symbol "="
                  e <- expression
                  return (a,e)
-    ret = do     reserved "return"
+    ret = do     p <- getPosition
+                 reserved "return"
                  e <- expression
                  symbol ";"
-                 return $ [Return e]
-    assert  = do reserved "assert"
+                 return $ [Return e p]
+    assert  = do p <- getPosition
+                 reserved "assert"
                  p <- getPosition
                  e <- parens expression
                  symbol ";"
-                 return $ [AssertStmt (sourceLine p) e]
-    errorS = do  symbol "/*"
+                 return $ [AssertStmt (sourceLine p) e p]
+    errorS = do  p1 <- getPosition
+                 symbol "/*"
                  reserved "ERROR_BEGIN"
                  symbol "*/"
                  s <- statements
                  symbol "/*"
                  reserved "ERROR_END"
+                 p2 <- getPosition
                  symbol "*/"
-                 return $ [BlockStmt "Error" s]
+                 return $ [BlockStmt "error" s p1 p2]
     block  = do  symbol "//"
+                 p1 <- getPosition
                  reserved "BEGIN"
                  bname <- parens identifier
                  s <-  statements 
                  symbol "//"
+                 p2 <- getPosition
                  reserved "END"
                  parens $ string bname
-                 return $ [BlockStmt bname s]
-    specS  = do  symbol "//"
+                 return $ [BlockStmt bname s p1 p2]
+    specS  = do  p <- getPosition
+                 symbol "//"
                  reserved "SPEC_BEGIN"
                  c <- manyTill ( (PC.anyChar)) specE
-                 return $ [Spec c]
+                 return $ [Spec c p]
     specE  = do  symbol "//"
                  reserved "SPEC_END"
 
@@ -300,27 +317,31 @@ statement = try basic <|> try cond <|> try condS <|> try ret <|> try assert <|> 
 basicStatement :: LangParser [Stmt]
 basicStatement = try passign <|> try assign <|> try expr <|> defAss
   where
-    passign = do i <- identifier
+    passign = do p <- getPosition
+                 i <- identifier
                  o <- pOpps
                  e <- expression
-                 return $ [AssignVar i (BinOpExpr (VarExpr i) o e)]
-    expr   = do  e <- expression
-                 return $ [Expression e]
-    assign = do  a <- identifier
+                 return $ [AssignVar i (BinOpExpr (VarExpr i) o e) p]
+    expr   = do  p <- getPosition
+                 e <- expression
+                 return $ [Expression e p]
+    assign = do  p <- getPosition
+                 a <- identifier
                  symbol "="
                  e <- expression
-                 return $ [AssignVar a e]
-    defAss = do  t <- cType
-                 p <- optionMaybe $ symbol "*"
+                 return $ [AssignVar a e p]
+    defAss = do  p <- getPosition
+                 t <- cType
+                 n <- optionMaybe $ symbol "*"
                  i <- identifier
                  l <- optionMaybe $ brackets constant
                  e <- optionMaybe $ symbol "=" >> expression
-                 let a = map (AssignVar i) $ maybeToList e 
-                 return $ case (p,l) of
-                    (Nothing, Nothing) -> (DefVar i t):a
-                    (Just _,  Nothing) -> (DefVar i (TPointer t)):a
-                    (Nothing, size)    -> (DefVar i (TArray t size)):a
-                    (Just _,  size)    -> (DefVar i (TPointer (TArray t size))):a
+                 let a = map (\x -> AssignVar i x p) $ maybeToList e 
+                 return $ case (n,l) of
+                    (Nothing, Nothing) -> (DefVar i t p):a
+                    (Just _,  Nothing) -> (DefVar i (TPointer t) p):a
+                    (Nothing, size)    -> (DefVar i (TArray t size) p):a
+                    (Just _,  size)    -> (DefVar i (TPointer (TArray t size)) p):a
 
 
 -- |Parses a expression using the buildExpressionParser

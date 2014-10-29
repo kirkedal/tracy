@@ -16,6 +16,10 @@ module Tracy.Ast where
 
 import qualified BitVector as BV
 import qualified Data.Array.IArray as A
+import qualified Text.Parsec.Pos as P
+
+type SourcePos = P.SourcePos
+initSourcePos = P.initialPos ""
 
 -- |A program is a sequence of functions and global definitions
 type Program  = ([Stmt], [Func])
@@ -34,17 +38,17 @@ data Func     = Func { retType   :: Type      -- ^ Return type
               deriving (Eq, Show)
 
 -- |A statement
-data Stmt     = DefVar Ident Type 
-              | Expression Expr                      
-              | AssignVar Ident Expr                    
-              | AssignArray Ident Expr Expr          
-              | Return Expr                       
-              | Cond Expr [Stmt] [Stmt]           
-              | While Expr [Stmt]
-              | AssertStmt Int Expr
-              | BlockStmt Ident [Stmt]
-              | Spec String
-              | Injection Action
+data Stmt     = DefVar Ident Type SourcePos
+              | Expression Expr SourcePos
+              | AssignVar Ident Expr SourcePos
+              | AssignArray Ident Expr Expr SourcePos
+              | Return Expr SourcePos
+              | Cond Expr [Stmt] [Stmt] SourcePos
+              | While Expr [Stmt] SourcePos
+              | AssertStmt Int Expr SourcePos
+              | BlockStmt Ident [Stmt] SourcePos SourcePos 
+              | Spec String SourcePos
+              | Injection Action SourcePos
               deriving (Show, Eq)
 
 -- |Expression 
@@ -150,14 +154,15 @@ instance Eq Value where
 -------------------------------------------------------------------------------
 
 -- Error numbers are not handled yet
-data Action     = Decl   ErrorNumber Type Ident
-                | Assume ErrorNumber Expr
-                | Assign ErrorNumber Ident Expr
-                | Assert ErrorNumber Expr
-                | Error  Action
-                | Debug  String
-                | Begin  String
-                | End    String
+data Action     = Decl    SourcePos ErrorNumber Type Ident
+                | Assume  SourcePos ErrorNumber Expr
+                | Assign  SourcePos ErrorNumber Ident Expr
+                | AssignA SourcePos ErrorNumber Ident Expr Expr
+                | Assert  SourcePos ErrorNumber Expr
+                | Error   SourcePos Action
+                | Debug   SourcePos String
+                | Begin   SourcePos String
+                | End     SourcePos String
                 deriving (Eq, Show)
 
 type ErrorNumber = String

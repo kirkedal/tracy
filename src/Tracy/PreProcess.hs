@@ -88,45 +88,54 @@ ppStmts :: [Stmt] -> FreshNames [Stmt]
 ppStmts stmts = liftM concat $ mapM ppStmt stmts
 
 ppStmt :: Stmt -> FreshNames [Stmt]
-ppStmt (DefVar ident typ) = 
-  do insertFreshFromIdent ident typ
+ppStmt (DefVar ident typ pos) = 
+  do setSourcePos pos 
+     insertFreshFromIdent ident typ
      return []
-ppStmt (Expression expr) = 
-  do e  <- ppExpr Top expr
+ppStmt (Expression expr pos) = 
+  do setSourcePos pos 
+     e  <- ppExpr Top expr
      es <- extractExprs 
-     return $ es ++ [(Expression e)]
-ppStmt (AssignVar ident expr) = 
-  do e  <- ppExpr Top expr 
+     return $ es ++ [Expression e pos]
+ppStmt (AssignVar ident expr pos) = 
+  do setSourcePos pos 
+     e  <- ppExpr Top expr 
      es <- extractExprs 
      i  <- getFreshFromIdent ident
-     return $ es ++ [(AssignVar i e)]
-ppStmt (AssignArray ident expr1 expr2) = 
-  do  e1 <- ppExpr Top expr1
-      e2 <- ppExpr Top expr2
-      es <- extractExprs 
-      return $ es ++ [AssignArray ident e1 e2]
-ppStmt (Return expr) =
-  do  e  <- ppExpr Top expr
-      es <- extractExprs 
-      return $ es ++ [(Return e)]
-ppStmt (Cond expr stmt1 stmt2) =
-  do  e  <- ppExpr Top expr
-      es <- extractExprs
-      s1 <- ppStmts stmt1
-      s2 <- ppStmts stmt2
-      return $ es ++ [(Cond e s1 s2)]
-ppStmt (While expr stmt) =
-  do  e  <- ppExpr Top expr
-      es <- extractExprs 
-      s  <- ppStmts stmt
-      return $ es ++ [(While e (s ++ es))]
-ppStmt (AssertStmt int expr) =
-  do  e  <- ppExpr Top expr
-      es <- extractExprs 
-      return $ es ++ [(AssertStmt int e)]
-ppStmt (BlockStmt ident stmts) =
-  do ss <- ppStmts stmts
-     return $ [BlockStmt ident ss]
+     return $ es ++ [AssignVar i e pos]
+ppStmt (AssignArray ident expr1 expr2 pos) = 
+  do setSourcePos pos 
+     e1 <- ppExpr Top expr1
+     e2 <- ppExpr Top expr2
+     es <- extractExprs 
+     return $ es ++ [AssignArray ident e1 e2 pos]
+ppStmt (Return expr pos) =
+  do setSourcePos pos 
+     e  <- ppExpr Top expr
+     es <- extractExprs 
+     return $ es ++ [Return e pos]
+ppStmt (Cond expr stmt1 stmt2 pos) =
+  do setSourcePos pos 
+     e  <- ppExpr Top expr
+     es <- extractExprs
+     s1 <- ppStmts stmt1
+     s2 <- ppStmts stmt2
+     return $ es ++ [Cond e s1 s2 pos]
+ppStmt (While expr stmt pos) =
+  do setSourcePos pos 
+     e  <- ppExpr Top expr
+     es <- extractExprs 
+     s  <- ppStmts stmt
+     return $ es ++ [While e (s ++ es) pos]
+ppStmt (AssertStmt int expr pos) =
+  do setSourcePos pos 
+     e  <- ppExpr Top expr
+     es <- extractExprs 
+     return $ es ++ [AssertStmt int e pos]
+ppStmt (BlockStmt ident stmts posf post) =
+  do setSourcePos posf 
+     ss <- ppStmts stmts
+     return $ [BlockStmt ident ss posf post]
 ppStmt s = return [s]
 
 
@@ -134,13 +143,13 @@ extractExprs :: FreshNames [Stmt]
 extractExprs =
   do  fnState <- get
       put $ fnState {assignList = []}
-      return $ reverse $ map (\(i,e) -> AssignVar i e) $ assignList fnState
+      return $ reverse $ map (\(i,e,p) -> AssignVar i e p) $ assignList fnState
 
 extractTypes :: FreshNames [Stmt]
 extractTypes =
   do  fnState <- get
       put $ fnState {declList = []}
-      return $ reverse $ map (\(i,t) -> DefVar i t) $ declList fnState
+      return $ reverse $ map (\(i,t,p) -> DefVar i t p) $ declList fnState
 
 data Place = Top | Rest
 
@@ -212,11 +221,11 @@ assignedVarsStmts stmts = nub $ concatMap assignedVarsStmt stmts
 
 
 assignedVarsStmt :: Stmt -> [Ident]
-assignedVarsStmt (AssignVar ident _) = [ident]
-assignedVarsStmt (AssignArray ident _ _) = [ident]
-assignedVarsStmt (Cond _ stmt1 stmt2) = assignedVarsStmts $ stmt1 ++ stmt2
-assignedVarsStmt (While _ stmts) = assignedVarsStmts stmts
-assignedVarsStmt (BlockStmt _ stmts) = assignedVarsStmts stmts
+assignedVarsStmt (AssignVar ident _ _) = [ident]
+assignedVarsStmt (AssignArray ident _ _ _) = [ident]
+assignedVarsStmt (Cond _ stmt1 stmt2 _) = assignedVarsStmts $ stmt1 ++ stmt2
+assignedVarsStmt (While _ stmts _) = assignedVarsStmts stmts
+assignedVarsStmt (BlockStmt _ stmts _ _) = assignedVarsStmts stmts
 assignedVarsStmt _ = []
 
 -------------------------------------------------------------------------------
@@ -227,10 +236,17 @@ type FreshNames a = State (FN) a
 
 data FN = FN { varInt     :: Int
              , identMap   :: Map.Map Ident (Ident, Type)
-             , assignList :: [(Ident, Expr)]
-             , declList   :: [(Ident, Type)]
+             , assignList :: [(Ident, Expr, SourcePos)]
+             , declList   :: [(Ident, Type, SourcePos)]
+             , currentPos :: SourcePos
              }
              deriving (Eq, Show)
+
+
+setSourcePos :: SourcePos -> FreshNames ()
+setSourcePos pos =
+  do fnState <- get
+     put $ fnState {currentPos = pos}
 
 -- |Gives a clean FreshNames state
 emptyFN :: FN
@@ -238,6 +254,7 @@ emptyFN = FN { varInt     = 1
              , identMap   = Map.empty
              , assignList = []
              , declList   = []
+             , currentPos = initSourcePos
              }
 
 
@@ -245,16 +262,17 @@ updFNWithArgs :: FN -> [Stmt] -> FN
 updFNWithArgs = foldl updFNWithArg
 
 updFNWithArg :: FN -> Stmt -> FN
-updFNWithArg fn (DefVar ident typ) = fn {identMap = Map.insert ident (ident, typ) (identMap fn)}
+updFNWithArg fn (DefVar ident typ _) = fn {identMap = Map.insert ident (ident, typ) (identMap fn)}
 
 
 -- |Returns the fresh name of a given identifier
 getFreshVar :: Expr -> Type -> FreshNames Ident
-getFreshVar expr typ = 
+getFreshVar expr typ  = 
   do  fnState <- get
       let varI = varInt fnState
           var = "_var_" ++ show (varInt fnState)
-      put $ fnState {varInt = varI + 1, assignList = (var, expr):(assignList fnState), declList = (var, typ):(declList fnState)}
+          pos = currentPos fnState
+      put $ fnState {varInt = varI + 1, assignList = (var, expr, pos):(assignList fnState), declList = (var, typ, pos):(declList fnState)}
       return var
 
 getFreshFromIdent :: Ident -> FreshNames Ident
@@ -272,15 +290,17 @@ getFreshVarFromIdent ident expr =
       let varI = varInt fnState
           var = ident
           (_,typ) = fromMaybe (error $ "Variable "++ ident ++" not found.") $  Map.lookup ident $ identMap fnState
-      put $ fnState { assignList = (var, expr):(assignList fnState)
+          pos = currentPos fnState
+      put $ fnState { assignList = (var, expr, pos):(assignList fnState)
                     , identMap = Map.insert ident (var, typ) (identMap fnState)}
       return var
 
 insertFreshFromIdent :: Ident -> Type -> FreshNames Ident
-insertFreshFromIdent ident typ = 
+insertFreshFromIdent ident typ= 
   do  fnState <- get
       let var = ident
-      put $ fnState {declList = (var, typ):(declList fnState), identMap = Map.insert ident (var, typ) (identMap fnState)}
+          pos = currentPos fnState      
+      put $ fnState {declList = (var, typ, pos):(declList fnState), identMap = Map.insert ident (var, typ) (identMap fnState)}
       return var
 
 lookupVar :: Ident -> FreshNames Ident

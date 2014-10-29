@@ -34,14 +34,14 @@ instance Pretty Func where
     concatMap pretty (body func)
 
 instance Pretty Stmt where
-  pretty (DefVar ident (TArray typ Nothing))  = "\n" ++ pretty typ ++ " " ++ ident ++ "[];"
-  pretty (DefVar ident (TArray typ (Just i))) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "];" 
-  pretty (DefVar ident (TPointer typ)) = "\n" ++ pretty typ ++ " &" ++ ident ++ ";" 
-  pretty (DefVar ident typ)       = "\n" ++ pretty typ ++ " " ++ ident ++ ";"
-  pretty (AssignVar ident expr) = ident ++ " = " ++ pretty expr ++ ";"
-  pretty (Expression expr) = pretty expr ++ ";"
-  pretty (AssignArray ident exprA expr) = "\n" ++ ident ++ "[" ++ pretty exprA ++ "] = " ++ pretty expr ++ ";"
-  pretty (Return expr) = "\nreturn" ++ pretty expr ++ ";"
+  pretty (DefVar ident (TArray typ Nothing) _)  = "\n" ++ pretty typ ++ " " ++ ident ++ "[];"
+  pretty (DefVar ident (TArray typ (Just i)) _) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "];" 
+  pretty (DefVar ident (TPointer typ) _) = "\n" ++ pretty typ ++ " &" ++ ident ++ ";" 
+  pretty (DefVar ident typ _)       = "\n" ++ pretty typ ++ " " ++ ident ++ ";"
+  pretty (AssignVar ident expr _) = ident ++ " = " ++ pretty expr ++ ";"
+  pretty (Expression expr _) = pretty expr ++ ";"
+  pretty (AssignArray ident exprA expr _) = "\n" ++ ident ++ "[" ++ pretty exprA ++ "] = " ++ pretty expr ++ ";"
+  pretty (Return expr _) = "\nreturn" ++ pretty expr ++ ";"
 
 instance Pretty Expr where
   pretty (VarExpr ident) = ident
@@ -139,24 +139,24 @@ instance PrettyC Func where
       funcname func ++ "(" ++ intercalate ", " (map pC (args func)) ++ ") {" ++ 
       prettyCs (body func) ++ "\n}\n"
     where
-      pC (DefVar ident (TArray typ Nothing))  = "\n" ++ pretty typ ++ " " ++ ident ++ "[]"
-      pC (DefVar ident (TArray typ (Just i))) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "]" 
-      pC (DefVar ident typ)       = prettyC typ ++ " " ++ ident
+      pC (DefVar ident (TArray typ Nothing) _)  = "\n" ++ pretty typ ++ " " ++ ident ++ "[]"
+      pC (DefVar ident (TArray typ (Just i)) _) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "]" 
+      pC (DefVar ident typ _)       = prettyC typ ++ " " ++ ident
       -- pC _ = undefined
 
 instance PrettyC Stmt where
-  prettyC (DefVar ident (TArray typ Nothing))  = "\n" ++ pretty typ ++ " " ++ ident ++ "[];"
-  prettyC (DefVar ident (TArray typ (Just i))) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "];" 
-  prettyC (DefVar ident typ)       = "\n" ++ prettyC typ ++ " " ++ ident ++ ";"
-  prettyC (AssignVar ident expr) = "\n" ++ ident ++ " = " ++ prettyC expr ++ ";"
-  prettyC (Expression expr) = "\n" ++ prettyC expr ++ ";"
-  prettyC (AssignArray ident exprA expr) = "\n" ++ ident ++ "[" ++ prettyC exprA ++ "] = " ++ prettyC expr ++ ";"
-  prettyC (Return expr) = "\nreturn " ++ prettyC expr ++ ";"
-  prettyC (Cond expr stmt1 stmt2) = "\nif (" ++ prettyC expr ++ ") {" ++ prettyCs stmt1 ++ "\n} else {" ++ prettyCs stmt2 ++ "\n}"
-  prettyC (While expr stmt) = "\nwhile (" ++ prettyC expr ++ ") {" ++ prettyCs stmt ++ "\n}"
-  prettyC (AssertStmt int expr) = "assert(" ++ prettyC expr ++ ");"
-  prettyC (BlockStmt bname stmts) = "\n// BEGIN(" ++ bname ++ ")" ++ prettyCs stmts ++ "\n// END(" ++ bname ++ ")"
-  prettyC (Spec string) = "\n// SPEC_BEGIN " ++ string ++ "//SPEC_END"
+  prettyC (DefVar ident (TArray typ Nothing) _)  = "\n" ++ pretty typ ++ " " ++ ident ++ "[];"
+  prettyC (DefVar ident (TArray typ (Just i)) _) = "\n" ++ pretty typ ++ " " ++ ident ++ "[" ++ show i ++ "];" 
+  prettyC (DefVar ident typ _)       = "\n" ++ prettyC typ ++ " " ++ ident ++ ";"
+  prettyC (AssignVar ident expr _) = "\n" ++ ident ++ " = " ++ prettyC expr ++ ";"
+  prettyC (Expression expr _) = "\n" ++ prettyC expr ++ ";"
+  prettyC (AssignArray ident exprA expr _) = "\n" ++ ident ++ "[" ++ prettyC exprA ++ "] = " ++ prettyC expr ++ ";"
+  prettyC (Return expr _) = "\nreturn " ++ prettyC expr ++ ";"
+  prettyC (Cond expr stmt1 stmt2 _) = "\nif (" ++ prettyC expr ++ ") {" ++ prettyCs stmt1 ++ "\n} else {" ++ prettyCs stmt2 ++ "\n}"
+  prettyC (While expr stmt _) = "\nwhile (" ++ prettyC expr ++ ") {" ++ prettyCs stmt ++ "\n}"
+  prettyC (AssertStmt int expr _) = "assert(" ++ prettyC expr ++ ");"
+  prettyC (BlockStmt bname stmts _ _) = "\n// BEGIN(" ++ bname ++ ")" ++ prettyCs stmts ++ "\n// END(" ++ bname ++ ")"
+  prettyC (Spec string _) = "\n// SPEC_BEGIN " ++ string ++ "//SPEC_END"
 
 instance PrettyC Expr where
   prettyC (VarExpr ident) = ident

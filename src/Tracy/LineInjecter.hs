@@ -12,7 +12,9 @@
 --
 -----------------------------------------------------------------------------
 
-module Tracy.LineInjecter (injectLine) where
+module Tracy.LineInjecter (injection) where
+
+import Tracy.Types
 
 import Text.Parsec.String
 import Text.Parsec.Char
@@ -29,11 +31,14 @@ import Data.String (fromString)
 -- ** Main functions
 -------------------------------------------------------------------------------
 
-injectLine :: String -> [String] -> IO String
-injectLine filename updates =
-    do lines <- parseInput filename
-       let pUpdates = map parseInjection updates
-       return $ intercalate "\n" $ foldl updateLine lines pUpdates
+injection :: Settings -> IO String
+injection settings = 
+  do lines <- parseInput $ filename settings
+     let injLines = injectLine (injections settings) lines
+         blockLines = injectBlock (blockAnnotation settings) injLines
+     return $ intercalate "\n" blockLines
+
+-- Parsing input file
 
 parseInput :: String -> IO [String]
 parseInput filename = 
@@ -46,6 +51,44 @@ parseInput filename =
             do l <- many $ try (manyTill anyChar newline)
                c <- many anyChar
                return $ l ++ [c]
+
+--- Injection Blocks
+
+injectBlock :: [(String,String)] -> [String] -> [String]
+injectBlock blockann lines = foldl addBlocks lines parsedAnn
+  where
+    parsedAnn :: [(String, (Int,Int))]
+    parsedAnn = map (\(x,y) -> (x, parseBlockInterval y)) blockann
+
+addBlocks :: [String] -> (String, (Int,Int)) -> [String]
+addBlocks list (blockname, (from, to)) = 
+  front ++ (begin:err) ++ (end:back)
+  where
+    begin = "// BEGIN(" ++ blockname ++ ")"
+    end   = "// END(" ++ blockname ++ ")"
+    (front,rest) = splitAt (from - 1) list
+    (err,back) = splitAt (to - from +1) rest
+
+parseBlockInterval :: String -> (Int, Int)
+parseBlockInterval str =
+       case parse biParser "Block Annotation" str of
+          Left err      -> error $ show err
+          Right (n1,n2) -> 
+            if n1 > n2
+              then error $ "In block annotation: interval has negative size (" ++ show n1 ++ "-" ++ show n2 ++ ")"
+              else (n1,n2)
+    where
+        biParser =
+            do n1 <- number
+               char '-'
+               n2 <- number
+               return (read n1, read n2)
+        number = many digit
+
+--- Injecting lines 
+
+injectLine :: [String] -> [String] -> [String]
+injectLine updates lines = foldl updateLine lines $ map parseInjection updates
 
 updateLine :: [String] -> (Int, String) -> [String]
 updateLine list (n, element) = (take (n-1) list) ++ (element:(drop n list))
